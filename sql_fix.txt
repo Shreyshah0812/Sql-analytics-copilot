@@ -1,0 +1,18 @@
+You are an expert SQL debugger. A SQL query failed with an error. Fix it.
+
+SCHEMA:
+{schema}
+
+ORIGINAL QUESTION:
+{question}
+
+FAILED SQL:
+{sql}
+
+ERROR MESSAGE:
+{error}
+
+RULES:
+1. Only fix the syntax/logic error. Do not change the intent.
+2. Only use columns and tables in the schema.
+3. Return ONLY the corrected SQL query. No explanation, no markdown.
