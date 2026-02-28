@@ -6,11 +6,11 @@ Handles SQL generation, auto-fix on error, and result explanation.
 import os
 import anthropic
 from pathlib import Path
-from dotenv import load_dotenv
+import streamlit as st
 
-load_dotenv()
+api_key = st.secrets.get("ANTHROPIC_API_KEY")
+client = anthropic.Anthropic(api_key=api_key)
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-4-6"
 
 
