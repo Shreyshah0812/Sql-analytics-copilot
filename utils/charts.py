@@ -352,7 +352,12 @@ def _hbar(df, cat, num, title):
     fig.update_layout(**LAYOUT, coloraxis_showscale=False,
                       height=max(300, len(df_s) * 28 + 80))
     fig.update_xaxes(**AXIS_STYLE)
-    fig.update_yaxes(**AXIS_STYLE, tickfont=dict(size=11, color="#c8c5e8"))
+    fig.update_yaxes(
+        gridcolor="rgba(255,255,255,0.05)",
+        zerolinecolor="rgba(255,255,255,0.08)",
+        title_font=dict(size=12, color="#7a7890"),
+        tickfont=dict(size=11, color="#c8c5e8"),
+    )
     fig.update_traces(marker_line_width=0)
     return fig
 
