@@ -75,12 +75,56 @@ def _date_cols(df):
     return found
 
 def _geo_cols(df):
-    GEO_KEYWORDS = ["country", "nation", "state", "region", "city", "province", "territory"]
-    return [c for c in df.columns if any(kw in c.lower() for kw in GEO_KEYWORDS)]
+    """
+    Only return a column as geographic if:
+    1. Column name contains geo keywords AND
+    2. The actual VALUES look like real country names or ISO codes
+       (not customer names, product names, etc.)
+    """
+    GEO_KEYWORDS = ["country", "nation", "billingcountry", "shipcountry"]
+    STATE_KEYWORDS = ["state", "province", "region"]
 
-def _is_ranking(df, cat_col, num_col):
-    """True if data looks like a top-N ranking (few rows, sorted by value)."""
-    return len(df) <= 30 and df[num_col].is_monotonic_decreasing or len(df) <= 20
+    KNOWN_COUNTRIES = {
+        "usa", "united states", "uk", "united kingdom", "germany", "france",
+        "canada", "australia", "brazil", "india", "china", "japan", "italy",
+        "spain", "mexico", "argentina", "netherlands", "sweden", "norway",
+        "denmark", "finland", "portugal", "belgium", "switzerland", "austria",
+        "new zealand", "south africa", "russia", "poland", "czech republic",
+        "hungary", "romania", "greece", "turkey", "israel", "egypt", "nigeria",
+        "kenya", "ghana", "indonesia", "thailand", "malaysia", "singapore",
+        "philippines", "vietnam", "south korea", "taiwan", "hong kong",
+    }
+
+    valid = []
+    for col in df.columns:
+        col_lower = col.lower().replace(" ", "").replace("_", "")
+        is_geo_name = any(kw in col_lower for kw in GEO_KEYWORDS + STATE_KEYWORDS)
+        if not is_geo_name:
+            continue
+
+        # Validate that the VALUES actually look geographic
+        sample_vals = df[col].dropna().astype(str).str.strip().str.lower().head(20).tolist()
+        if not sample_vals:
+            continue
+
+        # Check: are most values known country names or 2-letter ISO codes?
+        matches = sum(
+            1 for v in sample_vals
+            if v in KNOWN_COUNTRIES or (len(v) == 2 and v.isalpha())
+        )
+        match_rate = matches / len(sample_vals)
+
+        # Only treat as geo if >40% of values are recognizable geographic names
+        if match_rate >= 0.4:
+            valid.append(col)
+
+    return valid
+
+def _is_ranking(title):
+    """True if the question looks like a top-N ranking."""
+    keywords = ["top", "best", "highest", "most", "largest", "biggest",
+                "worst", "lowest", "least", "bottom", "rank"]
+    return any(kw in title.lower() for kw in keywords)
 
 def _is_percentage(df, col):
     vals = df[col].dropna()
@@ -146,20 +190,12 @@ def auto_chart(df: pd.DataFrame, title: str = "") -> Figure | None:
     if _is_funnel(title) and cats and numeric:
         return _funnel(df, cats[0], numeric[0], title)
 
-    # ── 3. Geographic choropleth ───────────────────────────────────
-    if geos and numeric:
-        return _choropleth(df, geos[0], numeric[0], title)
+    # ── 3. Ranking → ALWAYS horizontal bar (before geo check) ──────
+    # e.g. "top 10 customers by spend", "best products", "highest revenue"
+    if _is_ranking(title) and cats and numeric:
+        return _hbar(df, cats[0], numeric[0], title)
 
-    # ── 4. Correlation matrix (many numerics, no cats) ─────────────
-    if len(numeric) >= 4 and not dates and not cats:
-        return _heatmap_corr(df, numeric, title)
-
-    # ── 5. Scatter (2 numerics, correlation intent) ─────────────────
-    if len(numeric) >= 2 and (_is_correlation(title) or (not dates and not cats)):
-        if rows > 5:
-            return _scatter(df, numeric[0], numeric[1], cats[0] if cats else None, title)
-
-    # ── 6. Time series ─────────────────────────────────────────────
+    # ── 4. Time series ─────────────────────────────────────────────
     if dates and numeric:
         x = dates[0]
         try:
@@ -179,11 +215,26 @@ def auto_chart(df: pd.DataFrame, title: str = "") -> Figure | None:
         # Simple line
         return _line(df, x, numeric[0], title)
 
-    # ── 7. Distribution ─────────────────────────────────────────────
+    # ── 5. Geographic choropleth ────────────────────────────────────
+    # Only triggers when geo values are VALIDATED as real countries/states
+    # AND there are enough rows to make a map meaningful
+    if geos and numeric and rows >= 5:
+        return _choropleth(df, geos[0], numeric[0], title)
+
+    # ── 6. Correlation matrix (many numerics, no cats) ─────────────
+    if len(numeric) >= 4 and not dates and not cats:
+        return _heatmap_corr(df, numeric, title)
+
+    # ── 7. Scatter (2 numerics, correlation intent) ─────────────────
+    if len(numeric) >= 2 and (_is_correlation(title) or (not dates and not cats)):
+        if rows > 5:
+            return _scatter(df, numeric[0], numeric[1], cats[0] if cats else None, title)
+
+    # ── 8. Distribution ─────────────────────────────────────────────
     if _is_distribution(title) and numeric:
         return _histogram(df, numeric[0], title)
 
-    # ── 8. Category + numeric ───────────────────────────────────────
+    # ── 9. Category + numeric ───────────────────────────────────────
     if cats and numeric:
         cat_col  = cats[0]
         num_col  = numeric[0]
@@ -200,11 +251,11 @@ def auto_chart(df: pd.DataFrame, title: str = "") -> Figure | None:
         if len(numeric) >= 2:
             return _grouped_bar(df, cat_col, numeric[:3], title)
 
-        # Ranking → horizontal bar
+        # Few categories → horizontal bar
         if n_cats <= 25:
             return _hbar(df, cat_col, num_col, title)
 
-        # Too many cats → treemap
+        # Many categories → treemap
         return _treemap(df, cat_col, num_col, title)
 
     # ── 9. Single numeric distribution fallback ──────────────────────
