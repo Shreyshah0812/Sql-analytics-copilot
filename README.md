@@ -1,142 +1,159 @@
-# 🧠 SQL + Analytics Copilot
+# DataMind — AI Analytics Copilot
 
-A production-quality AI copilot that converts plain English into SQL, runs queries, auto-charts results, and explains them like a senior data analyst.
+**Ask your data questions in plain English. Get SQL, results, charts, and an analyst-style explanation back.**
 
-Built for **data analyst portfolio projects** — maps directly to real DA workflows.
+DataMind is an AI copilot that turns natural-language questions into validated SQL, runs them against a database or an uploaded CSV, auto-selects the right chart, and explains the result the way a data analyst would — including the assumptions and pitfalls behind the number.
 
----
+🔗 **Live demo:** https://datamind-shrey.streamlit.app/
+💻 **Code:** https://github.com/Shreyshah0812/Sql-analytics-copilot
 
-## 📸 What it does
-
-1. **Connect** to a sample SQLite DB or upload your own CSV
-2. **Ask** a question in plain English
-3. **Get back:**
-   - ✅ Generated SQL (transparent, editable)
-   - ✅ Query results table (downloadable)
-   - ✅ Auto chart (line, bar, scatter, KPI card)
-   - ✅ Analyst-style explanation with assumptions + pitfalls
-4. **Auto-fix** — if SQL errors, Claude rewrites and retries automatically
-5. **Follow-up questions** — multi-turn context (ask "now break it down by country")
+> Built to mirror a real data-analyst workflow: ask → query → validate → visualize → interpret.
 
 ---
 
-## 🏗️ Architecture
+## Why this is interesting (the engineering, not the buzzwords)
+
+Most "text-to-SQL" demos stop at generating a query. The harder, more realistic problems are everything *around* the generation — and that's where most of the work here went:
+
+- **A safety layer that assumes the model can be wrong.** Generated SQL never touches the database until it passes a guardrail check: SELECT/CTE-only, a blocklist of mutating keywords (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, …) matched as whole words, and an enforced row `LIMIT` so a careless query can't run away.
+- **A self-correcting query loop.** If a query fails at execution, the error is fed back to the model with the schema and original question to produce a corrected query, which is then re-validated and retried — so a single malformed query doesn't dead-end the user.
+- **Post-query data-quality checks.** After results come back, the app runs analyst sanity checks and surfaces warnings the user would otherwise miss: high null rates, likely many-to-many join explosions, duplicate keys (double-counting risk), extreme outliers, and mixed-grain time dimensions.
+- **Context-aware chart selection.** A decision engine picks from 12 chart types based on the *shape* of the result — time series → line, ranking → horizontal bar, part-of-whole → donut/treemap, geographic → choropleth, two metrics → scatter with trendline, and so on.
+- **Multi-turn follow-ups.** Conversation history is passed back to the model, so "now break it down by country" works without restating the question.
+
+---
+
+## What it does
+
+1. **Load data** — use the built-in sample music-store database, or upload your own CSV.
+2. **See an instant overview** — row/column counts, data types, null percentages per column, and a preview, before you ask anything.
+3. **Ask in plain English** — "revenue trend by month", "top 10 customers by spend", "which genres are most popular?"
+4. **Get back, in tabs:**
+   - the generated SQL (transparent and inspectable)
+   - the result table (with CSV export)
+   - an auto-selected interactive chart
+   - an analyst-style explanation covering assumptions and pitfalls
+   - data-quality warnings, when any apply
+5. **Follow up** — ask a refinement and it keeps the context.
+
+---
+
+## Architecture
 
 ```
-User (Streamlit UI)
-        ↕
-    app.py  ← orchestration layer
-        ↕
-  utils/llm.py  ← Claude API (sql_gen → sql_fix → explain)
-        ↕
-utils/guardrails.py  ← safety validation
-        ↕
-  utils/db.py  ← SQLite or DuckDB (CSV) execution
-        ↕
- utils/charts.py  ← auto Plotly chart selection
-        ↕
-utils/validators.py  ← data quality checks
+              Streamlit UI  (app.py)
+          upload → overview → chat
+                     │
+        ┌────────────┼─────────────────────────┐
+        ▼            ▼                           ▼
+   llm.py       guardrails.py                db.py
+ Claude API   validate + enforce        SQLite / DuckDB
+ gen→fix→     LIMIT, block writes        schema + execute
+ explain          │                          │
+        └─────────┴───────────┬──────────────┘
+                              ▼
+                  validators.py   charts.py
+                  data-quality     auto chart
+                   warnings        selection
 ```
+
+**Request flow for one question:**
+
+`question → generate_sql → validate_sql → run query → (on error: fix_sql → re-validate → retry) → run_validations → explain_results → auto_chart`
 
 ---
 
-## 🚀 Setup
+## Tech stack
 
-### 1. Clone & install
+| Layer | Choice |
+|---|---|
+| UI | Streamlit |
+| Language | Python |
+| LLM | Anthropic Claude (`claude-sonnet-4-6`) |
+| Query engines | SQLite (sample DB), DuckDB (uploaded CSVs) |
+| Data | pandas |
+| Charts | Plotly |
+| Config | YAML (KPI definitions), prompt templates as text files |
+
+---
+
+## Run it locally
 
 ```bash
-git clone <your-repo>
-cd sql-analytics-copilot
+git clone <your-repo-url>
+cd datamind
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Add your API key
+Add your Anthropic API key. For local runs, create `.streamlit/secrets.toml`:
 
-```bash
-cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+```toml
+ANTHROPIC_API_KEY = "sk-ant-..."
 ```
 
-### 3. Run
+Then:
 
 ```bash
 streamlit run app.py
 ```
 
-The sample DB is auto-seeded on first run. No setup needed.
+The sample database seeds automatically on first run — no setup needed.
 
 ---
 
-## 💡 Example questions to try
-
-| Question | What it demonstrates |
-|---|---|
-| "Revenue trend by month" | Time series line chart |
-| "Top 10 customers by total spend" | Bar chart + ranking |
-| "Revenue by country" | Category aggregation |
-| "Average order value" | KPI card |
-| "Which genres are most popular?" | Join across tables |
-| "Now break it down by year" | Follow-up / multi-turn |
-
----
-
-## 🛡️ Safety features
-
-- Blocks `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `PRAGMA`, `ATTACH`
-- Enforces `LIMIT 1000` max to prevent runaway queries
-- Auto-adds `LIMIT 100` if missing
-- Rejects queries that don't start with `SELECT` or `WITH`
-
----
-
-## 📁 Project structure
+## Project structure
 
 ```
-sql-analytics-copilot/
-  app.py                  ← Main Streamlit app
+datamind/
+  app.py                  Streamlit app: upload → overview → chat
   requirements.txt
-  .env.example
   db/
-    sample.db             ← Auto-seeded Chinook-style DB
+    sample.db             Auto-seeded sample music-store DB
   prompts/
-    sql_gen.txt           ← NL → SQL system prompt
-    sql_fix.txt           ← Error correction prompt
-    sql_explain.txt       ← Result explanation prompt
+    sql_gen.txt           Natural language → SQL
+    sql_fix.txt           Error-correction prompt
+    sql_explain.txt       Result-explanation prompt
   metrics/
-    kpis.yaml             ← Business KPI definitions
+    kpis.yaml             Business KPI definitions (consistent metric logic)
   utils/
-    db.py                 ← Schema extraction + query execution
-    llm.py                ← Claude API calls
-    guardrails.py         ← SQL safety validation
-    charts.py             ← Auto chart selection (Plotly)
-    validators.py         ← Post-query data quality checks
+    db.py                 Schema extraction + query execution (SQLite / DuckDB)
+    llm.py                Claude API calls
+    guardrails.py         SQL safety validation
+    charts.py             Context-aware chart selection (12 types)
+    validators.py         Post-query data-quality checks
 ```
 
 ---
 
-## 🔧 Extending it
+## Design decisions worth calling out
 
-| Feature | Where to add |
-|---|---|
-| Connect to Postgres | `utils/db.py` — swap SQLite for `psycopg2` |
-| Add more KPIs | `metrics/kpis.yaml` |
-| Tune SQL rules | `prompts/sql_gen.txt` |
-| Add more chart types | `utils/charts.py` |
-| Add auth | Wrap `app.py` with `streamlit-authenticator` |
+- **KPIs live in a config file, not in prompts.** `metrics/kpis.yaml` defines metrics like revenue, AOV, and revenue-per-customer once, so the same definition is reused across questions instead of the model re-deriving (and potentially redefining) a metric each time.
+- **Prompts are versioned as files, not inline strings.** Generation, fixing, and explanation each have their own template in `prompts/`, which keeps them easy to tune without touching application code.
+- **Read-only by design.** The tool is deliberately incapable of mutating data — the guardrail layer enforces it rather than trusting the model to behave.
 
 ---
 
-## ⚠️ Limitations
+## Limitations (by design and otherwise)
 
-- Read-only queries only (by design)
-- SQL dialect: SQLite (for file DB) or DuckDB SQL (for CSV uploads)
-- LLM may hallucinate if schema is very large (>50 tables) — use schema filtering
-- Multi-file CSV joins not yet supported
+- Read-only SELECT queries only — no data mutation, intentionally.
+- SQL dialects: SQLite for the sample DB, DuckDB SQL for uploaded CSVs.
+- Very large schemas (50+ tables) can crowd the prompt; schema filtering would be the next step.
+- Single-table CSV uploads — multi-file CSV joins aren't supported yet.
 
 ---
 
-## 📄 License
+## Possible next steps
+
+These are deliberately scoped as future work rather than half-built features:
+
+- An AI **data-profiling agent** that produces a dataset health score and per-column recommendations.
+- A one-click **executive PDF report** (overview + key insights + charts).
+- **Schema filtering / retrieval** to support large databases.
+
+---
+
+## License
 
 MIT
